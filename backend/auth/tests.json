@@ -1,0 +1,35 @@
+{
+  "tests": [
+    {
+      "name": "Register new user",
+      "method": "POST",
+      "path": "/auth/register",
+      "body": {
+        "username": "testuser123",
+        "display_name": "Test User",
+        "email": "test123@example.com",
+        "password": "password123"
+      },
+      "expectedStatus": 201
+    },
+    {
+      "name": "Login with credentials",
+      "method": "POST",
+      "path": "/auth/login",
+      "body": {
+        "login": "testuser123",
+        "password": "password123"
+      },
+      "expectedStatus": 200
+    },
+    {
+      "name": "Register with missing fields",
+      "method": "POST",
+      "path": "/auth/register",
+      "body": {
+        "username": "test"
+      },
+      "expectedStatus": 400
+    }
+  ]
+}
