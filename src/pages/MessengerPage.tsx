@@ -2,19 +2,25 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   getStoredToken, getCurrentUser, getUserChats, getChatMessages,
-  sendMessage, searchUsers, createChat, logout, initDemoData
+  sendMessage, searchUsers, createChat, logout, getOnlineUsers
 } from "@/lib/storage";
 import { User, Chat, Message } from "@/lib/types";
 import { toast } from "sonner";
 import SettingsSidebar from "@/components/SettingsSidebar";
 
-function Avatar({ color, initials, size = "md", online }: { color: string; initials?: string; size?: "sm" | "md" | "lg"; online?: boolean }) {
+function Avatar({ color, initials, size = "md", online, imageUrl }: {
+  color: string; initials?: string; size?: "sm" | "md" | "lg"; online?: boolean; imageUrl?: string;
+}) {
   const sizes = { sm: "w-8 h-8 text-xs", md: "w-11 h-11 text-sm", lg: "w-14 h-14 text-base" };
   return (
     <div className="relative inline-block flex-shrink-0">
-      <div className={`${sizes[size]} rounded-full flex items-center justify-center font-bold text-white shadow-md`} style={{ backgroundColor: color }}>
-        {initials || "?"}
-      </div>
+      {imageUrl ? (
+        <img src={imageUrl} alt="" className={`${sizes[size]} rounded-full object-cover shadow-md`} />
+      ) : (
+        <div className={`${sizes[size]} rounded-full flex items-center justify-center font-bold text-white shadow-md`} style={{ backgroundColor: color }}>
+          {initials || "?"}
+        </div>
+      )}
       {online !== undefined && (
         <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#1a1a2e] ${online ? "bg-emerald-400" : "bg-gray-500"}`} />
       )}
@@ -41,7 +47,20 @@ function formatMessageDate(isoStr: string) {
   return d.toLocaleDateString("ru", { day: "numeric", month: "long", year: "numeric" });
 }
 
-export default function MessengerPage() {
+function formatLastSeen(isoStr?: string) {
+  if (!isoStr) return "давно";
+  const d = new Date(isoStr);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  if (diff < 60000) return "только что";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} мин. назад`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч. назад`;
+  return d.toLocaleDateString("ru", { day: "numeric", month: "short" });
+}
+
+type SidebarTab = "chats" | "people";
+
+function MessengerPage() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -54,8 +73,14 @@ export default function MessengerPage() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("chats");
+  const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sendingMessage, setSendingMessage] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const messagePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -67,44 +92,101 @@ export default function MessengerPage() {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  // Auth check & initial load
   useEffect(() => {
-    initDemoData();
-    const token = getStoredToken();
-    if (!token) { navigate("/auth"); return; }
-    const user = getCurrentUser(token);
-    if (!user) { navigate("/auth"); return; }
-    setCurrentUser(user);
-    loadChats(user.id);
+    const init = async () => {
+      const token = getStoredToken();
+      if (!token) { navigate("/auth"); return; }
+      const user = await getCurrentUser(token);
+      if (!user) { navigate("/auth"); return; }
+      setCurrentUser(user);
+      setLoading(false);
+      await loadChats(token);
+      await loadOnlineUsers(token);
+    };
+    init();
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (messagePollRef.current) clearInterval(messagePollRef.current);
+    };
   }, [navigate]);
+
+  // Polling for chats & online users
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token || !currentUser) return;
+
+    pollRef.current = setInterval(async () => {
+      await loadChats(token);
+      if (sidebarTab === "people") {
+        await loadOnlineUsers(token);
+      }
+    }, 3000);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [currentUser, sidebarTab]);
+
+  // Polling for messages in selected chat
+  useEffect(() => {
+    if (!selectedChatId) return;
+    const token = getStoredToken();
+    if (!token) return;
+
+    messagePollRef.current = setInterval(async () => {
+      const msgs = await getChatMessages(token, selectedChatId);
+      setMessages(msgs);
+    }, 2000);
+
+    return () => {
+      if (messagePollRef.current) clearInterval(messagePollRef.current);
+    };
+  }, [selectedChatId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const loadChats = useCallback((userId: string) => {
-    const userChats = getUserChats(userId, userId);
+  const loadChats = useCallback(async (token: string) => {
+    const userChats = await getUserChats(token);
     setChats(userChats);
   }, []);
 
-  const handleSelectChat = useCallback((chatId: string) => {
+  const loadOnlineUsers = useCallback(async (token: string) => {
+    const users = await getOnlineUsers(token);
+    setOnlineUsers(users);
+  }, []);
+
+  const handleSelectChat = useCallback(async (chatId: string) => {
     setSelectedChatId(chatId);
-    if (!currentUser) return;
-    const msgs = getChatMessages(chatId, currentUser.id);
+    const token = getStoredToken();
+    if (!token) return;
+    const msgs = await getChatMessages(token, chatId);
     setMessages(msgs);
     setShowSearch(false);
     if (isMobile) setShowSidebar(false);
-    // Reload chats to update unread counts
-    loadChats(currentUser.id);
-  }, [currentUser, isMobile, loadChats]);
+    await loadChats(token);
+  }, [isMobile, loadChats]);
 
-  const handleSendMessage = useCallback(() => {
-    if (!messageInput.trim() || !selectedChatId || !currentUser) return;
-    const msg = sendMessage(selectedChatId, currentUser.id, messageInput);
-    setMessages(prev => [...prev, msg]);
-    setMessageInput("");
-    loadChats(currentUser.id);
+  const handleSendMessage = useCallback(async () => {
+    if (!messageInput.trim() || !selectedChatId || sendingMessage) return;
+    const token = getStoredToken();
+    if (!token) return;
+
+    setSendingMessage(true);
+    const msg = await sendMessage(token, selectedChatId, messageInput);
+    if (msg) {
+      setMessages(prev => [...prev, msg]);
+      setMessageInput("");
+      await loadChats(token);
+    } else {
+      toast.error("Не удалось отправить сообщение");
+    }
+    setSendingMessage(false);
     inputRef.current?.focus();
-  }, [messageInput, selectedChatId, currentUser, loadChats]);
+  }, [messageInput, selectedChatId, sendingMessage, loadChats]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -113,25 +195,33 @@ export default function MessengerPage() {
     }
   };
 
-  const handleSearch = (q: string) => {
+  const handleSearch = async (q: string) => {
     setSearchQuery(q);
-    if (!currentUser || q.length < 2) { setSearchResults([]); return; }
-    setSearchResults(searchUsers(q, currentUser.id));
+    const token = getStoredToken();
+    if (!token || q.length < 1) { setSearchResults([]); return; }
+    const results = await searchUsers(token, q);
+    setSearchResults(results);
   };
 
-  const handleStartChat = (user: User) => {
-    if (!currentUser) return;
-    const chatId = createChat(currentUser.id, user.id);
-    loadChats(currentUser.id);
+  const handleStartChat = async (user: User) => {
+    const token = getStoredToken();
+    if (!token) return;
+    const result = await createChat(token, user.id);
+    if ("error" in result) {
+      toast.error(result.error);
+      return;
+    }
+    await loadChats(token);
     setShowSearch(false);
     setSearchQuery("");
     setSearchResults([]);
-    handleSelectChat(chatId);
+    setSidebarTab("chats");
+    handleSelectChat(result.chat_id);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     const token = getStoredToken();
-    if (token) logout(token);
+    if (token) await logout(token);
     navigate("/auth");
     toast.success("Вы вышли из аккаунта");
   };
@@ -150,11 +240,18 @@ export default function MessengerPage() {
     }
   });
 
-  if (!currentUser) return (
+  if (loading) return (
     <div className="min-h-screen bg-[#0f0c29] flex items-center justify-center">
-      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-white/40 text-sm">Загрузка...</p>
+      </div>
     </div>
   );
+
+  if (!currentUser) return null;
+
+  const onlineCount = onlineUsers.filter(u => u.is_online).length;
 
   return (
     <div className="h-screen bg-[#0f0c29] flex overflow-hidden">
@@ -190,14 +287,49 @@ export default function MessengerPage() {
             </button>
           </div>
 
-          {/* Search / New Chat */}
+          {/* Tabs: Чаты / Люди */}
+          <div className="flex bg-white/5 rounded-xl p-0.5 mb-3">
+            <button
+              onClick={() => setSidebarTab("chats")}
+              className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all ${
+                sidebarTab === "chats"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-white/50 hover:text-white/80"
+              }`}
+            >
+              <svg className="w-4 h-4 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              Чаты
+            </button>
+            <button
+              onClick={() => { setSidebarTab("people"); const t = getStoredToken(); if (t) loadOnlineUsers(t); }}
+              className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all ${
+                sidebarTab === "people"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-white/50 hover:text-white/80"
+              }`}
+            >
+              <svg className="w-4 h-4 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              Люди
+              {onlineCount > 0 && (
+                <span className="ml-1 bg-emerald-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 inline-flex items-center justify-center px-1">
+                  {onlineCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Search */}
           <div className="relative">
             <input
               type="text"
               value={searchQuery}
               onChange={e => handleSearch(e.target.value)}
               onFocus={() => setShowSearch(true)}
-              placeholder="Поиск или новый чат..."
+              placeholder={sidebarTab === "chats" ? "Поиск чатов и пользователей..." : "Поиск людей..."}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-all"
             />
             <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -217,67 +349,140 @@ export default function MessengerPage() {
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors"
               >
                 <Avatar color={user.avatar_color} initials={user.avatar_initials} size="sm" online={user.is_online} />
-                <div className="min-w-0 text-left">
+                <div className="min-w-0 text-left flex-1">
                   <p className="text-white text-sm font-medium truncate">{user.display_name}</p>
                   <p className="text-white/40 text-xs">@{user.username}</p>
                 </div>
+                {user.is_online && (
+                  <span className="text-emerald-400 text-[10px] font-medium bg-emerald-400/10 px-2 py-0.5 rounded-full">онлайн</span>
+                )}
               </button>
             ))}
           </div>
         )}
 
-        {showSearch && searchQuery.length >= 2 && searchResults.length === 0 && (
+        {showSearch && searchQuery.length >= 1 && searchResults.length === 0 && (
           <div className="px-4 py-6 text-center">
             <p className="text-white/30 text-sm">Пользователи не найдены</p>
           </div>
         )}
 
-        {/* Chat List */}
+        {/* Content based on tab */}
         <div className="flex-1 overflow-y-auto scrollbar-thin">
-          {!showSearch || searchQuery.length < 2 ? (
-            chats.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full px-8 text-center">
-                <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                </div>
-                <p className="text-white/30 text-sm">Нет чатов</p>
-                <p className="text-white/20 text-xs mt-1">Найдите пользователя через поиск</p>
-              </div>
-            ) : (
-              chats.map(chat => (
-                <button
-                  key={chat.id}
-                  onClick={() => handleSelectChat(chat.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3.5 hover:bg-white/5 transition-colors border-b border-white/3 ${
-                    selectedChatId === chat.id ? "bg-indigo-600/20 border-l-2 border-l-indigo-500" : ""
-                  }`}
-                >
-                  <Avatar
-                    color={chat.display_avatar_color || chat.avatar_color}
-                    initials={chat.display_avatar_initials || undefined}
-                    size="md"
-                    online={chat.is_online}
-                  />
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="flex items-center justify-between">
-                      <p className="text-white text-sm font-medium truncate">{chat.display_name || chat.name || "Чат"}</p>
-                      <span className="text-white/30 text-xs flex-shrink-0 ml-2">{formatTime(chat.last_message_time)}</span>
-                    </div>
-                    <div className="flex items-center justify-between mt-0.5">
-                      <p className="text-white/40 text-xs truncate">{chat.last_message || "Нет сообщений"}</p>
-                      {(chat.unread_count ?? 0) > 0 && (
-                        <span className="flex-shrink-0 ml-2 bg-indigo-500 text-white text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                          {chat.unread_count}
-                        </span>
-                      )}
-                    </div>
+          {sidebarTab === "chats" ? (
+            /* CHATS TAB */
+            !showSearch || searchQuery.length < 1 ? (
+              chats.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full px-8 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4">
+                    <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
                   </div>
-                </button>
-              ))
-            )
-          ) : null}
+                  <p className="text-white/30 text-sm">Нет чатов</p>
+                  <p className="text-white/20 text-xs mt-1">Перейдите во вкладку «Люди» чтобы найти собеседников</p>
+                </div>
+              ) : (
+                chats.map(chat => (
+                  <button
+                    key={chat.id}
+                    onClick={() => handleSelectChat(chat.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3.5 hover:bg-white/5 transition-colors border-b border-white/3 ${
+                      selectedChatId === chat.id ? "bg-indigo-600/20 border-l-2 border-l-indigo-500" : ""
+                    }`}
+                  >
+                    <Avatar
+                      color={chat.display_avatar_color || chat.avatar_color}
+                      initials={chat.display_avatar_initials || undefined}
+                      size="md"
+                      online={chat.is_online}
+                    />
+                    <div className="flex-1 min-w-0 text-left">
+                      <div className="flex items-center justify-between">
+                        <p className="text-white text-sm font-medium truncate">{chat.display_name || chat.name || "Чат"}</p>
+                        <span className="text-white/30 text-xs flex-shrink-0 ml-2">{formatTime(chat.last_message_time)}</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <p className="text-white/40 text-xs truncate">{chat.last_message || "Нет сообщений"}</p>
+                        {(chat.unread_count ?? 0) > 0 && (
+                          <span className="flex-shrink-0 ml-2 bg-indigo-500 text-white text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                            {chat.unread_count}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )
+            ) : null
+          ) : (
+            /* PEOPLE TAB */
+            <>
+              {/* Online users section */}
+              {onlineUsers.filter(u => u.is_online).length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <p className="text-xs text-emerald-400 uppercase tracking-wider font-medium">
+                      Сейчас в сети — {onlineUsers.filter(u => u.is_online).length}
+                    </p>
+                  </div>
+                  {onlineUsers.filter(u => u.is_online).map(user => (
+                    <button
+                      key={user.id}
+                      onClick={() => handleStartChat(user)}
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors"
+                    >
+                      <Avatar color={user.avatar_color} initials={user.avatar_initials} size="md" online={true} />
+                      <div className="min-w-0 text-left flex-1">
+                        <p className="text-white text-sm font-medium truncate">{user.display_name}</p>
+                        <p className="text-white/40 text-xs">@{user.username}</p>
+                      </div>
+                      <span className="text-emerald-400 text-[10px] font-medium bg-emerald-400/10 px-2 py-0.5 rounded-full">онлайн</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Offline users section */}
+              {onlineUsers.filter(u => !u.is_online).length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5 border-t border-white/5">
+                    <div className="w-2 h-2 rounded-full bg-gray-500" />
+                    <p className="text-xs text-white/40 uppercase tracking-wider font-medium">
+                      Не в сети — {onlineUsers.filter(u => !u.is_online).length}
+                    </p>
+                  </div>
+                  {onlineUsers.filter(u => !u.is_online).map(user => (
+                    <button
+                      key={user.id}
+                      onClick={() => handleStartChat(user)}
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors"
+                    >
+                      <Avatar color={user.avatar_color} initials={user.avatar_initials} size="md" online={false} />
+                      <div className="min-w-0 text-left flex-1">
+                        <p className="text-white/70 text-sm font-medium truncate">{user.display_name}</p>
+                        <p className="text-white/30 text-xs">@{user.username}</p>
+                      </div>
+                      <span className="text-white/30 text-[10px]">{formatLastSeen(user.last_seen)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {onlineUsers.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-full px-8 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4">
+                    <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </div>
+                  <p className="text-white/30 text-sm">Пока нет других пользователей</p>
+                  <p className="text-white/20 text-xs mt-1">Пригласите друзей!</p>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Nexus branding */}
@@ -320,7 +525,7 @@ export default function MessengerPage() {
                 <p className="text-xs">
                   {selectedChat.is_online
                     ? <span className="text-emerald-400">В сети</span>
-                    : <span className="text-white/40">Не в сети</span>
+                    : <span className="text-white/40">был(а) {formatLastSeen(selectedChat.other_last_seen)}</span>
                   }
                 </p>
               </div>
@@ -356,47 +561,36 @@ export default function MessengerPage() {
                       return (
                         <div
                           key={msg.id}
-                          className={`flex items-end gap-2 ${msg.is_own ? "flex-row-reverse" : "flex-row"} ${isSameAuthor ? "mt-0.5" : "mt-3"}`}
+                          className={`flex items-end gap-2 ${msg.is_own ? "flex-row-reverse" : ""} ${isSameAuthor ? "mt-0.5" : "mt-3"}`}
                         >
-                          {/* Avatar - show only for last message in sequence */}
-                          {!msg.is_own && (
-                            <div className="w-8 flex-shrink-0">
-                              {!isSameAuthor ? (
-                                <Avatar
-                                  color={msg.sender_avatar_color || "#6366f1"}
-                                  initials={msg.sender_avatar_initials}
-                                  size="sm"
-                                />
-                              ) : null}
-                            </div>
-                          )}
-
-                          <div className={`max-w-[70%] ${msg.is_own ? "items-end" : "items-start"} flex flex-col`}>
+                          {!msg.is_own && !isSameAuthor ? (
+                            <Avatar
+                              color={msg.sender_avatar_color || "#6366f1"}
+                              initials={msg.sender_avatar_initials}
+                              size="sm"
+                            />
+                          ) : !msg.is_own ? (
+                            <div className="w-8" />
+                          ) : null}
+                          <div className={`max-w-[70%] ${msg.is_own ? "items-end" : "items-start"}`}>
                             {!isSameAuthor && !msg.is_own && (
-                              <p className="text-xs text-indigo-400 font-medium mb-1 ml-3">{msg.sender_name}</p>
+                              <p className="text-xs font-medium mb-1 ml-1" style={{ color: msg.sender_avatar_color || "#6366f1" }}>
+                                {msg.sender_name}
+                              </p>
                             )}
                             <div
-                              className={`relative px-4 py-2.5 rounded-2xl shadow-sm ${
+                              className={`px-3.5 py-2 rounded-2xl break-words text-sm leading-relaxed ${
                                 msg.is_own
-                                  ? "bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-br-sm"
-                                  : "bg-white/10 backdrop-blur-sm text-white border border-white/10 rounded-bl-sm"
+                                  ? "bg-indigo-600 text-white rounded-br-md"
+                                  : "bg-white/10 text-white/90 rounded-bl-md"
                               }`}
                             >
-                              <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
-                              <div className={`flex items-center gap-1 mt-1 ${msg.is_own ? "justify-end" : "justify-start"}`}>
-                                <span className={`text-xs ${msg.is_own ? "text-white/50" : "text-white/30"}`}>
-                                  {new Date(msg.created_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
-                                </span>
-                                {msg.is_own && (
-                                  <svg className={`w-3.5 h-3.5 ${msg.is_read ? "text-indigo-300" : "text-white/40"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    {msg.is_read ? (
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    ) : (
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                    )}
-                                  </svg>
-                                )}
-                              </div>
+                              {msg.content}
+                              <span className={`text-[10px] ml-2 inline-block float-right mt-1 ${
+                                msg.is_own ? "text-indigo-200/60" : "text-white/30"
+                              }`}>
+                                {new Date(msg.created_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -409,82 +603,70 @@ export default function MessengerPage() {
             </div>
 
             {/* Message Input */}
-            <div className="p-4 bg-[#16132a] border-t border-white/5">
-              <div className="flex items-end gap-3">
-                <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl flex items-end overflow-hidden focus-within:ring-1 focus-within:ring-indigo-500/40 focus-within:border-indigo-500/30 transition-all">
-                  <textarea
-                    ref={inputRef}
-                    value={messageInput}
-                    onChange={e => setMessageInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Написать сообщение..."
-                    rows={1}
-                    className="flex-1 bg-transparent px-4 py-3 text-white text-sm placeholder-white/30 focus:outline-none resize-none max-h-32 overflow-y-auto"
-                    style={{ lineHeight: "1.5" }}
-                  />
-                </div>
+            <div className="p-3 bg-[#16132a] border-t border-white/5">
+              <div className="flex items-end gap-2">
+                <textarea
+                  ref={inputRef}
+                  value={messageInput}
+                  onChange={e => setMessageInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Введите сообщение..."
+                  rows={1}
+                  className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 resize-none max-h-32 transition-all"
+                  style={{ minHeight: "44px" }}
+                />
                 <button
                   onClick={handleSendMessage}
-                  disabled={!messageInput.trim()}
-                  className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-700 hover:from-indigo-500 hover:to-purple-600 text-white flex items-center justify-center transition-all shadow-lg shadow-indigo-500/30 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                  disabled={!messageInput.trim() || sendingMessage}
+                  className="p-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
                 >
-                  <svg className="w-5 h-5 translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
+                  {sendingMessage ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  )}
                 </button>
               </div>
-              <p className="text-white/20 text-xs mt-2 text-center">Enter — отправить, Shift+Enter — новая строка</p>
             </div>
           </>
         ) : (
-          /* Empty state */
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-[#0f0c29] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-950/30 via-transparent to-transparent">
+          /* No chat selected */
+          <div className="flex-1 flex flex-col items-center justify-center bg-[#0f0c29] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-950/30 via-transparent to-transparent">
             {isMobile && (
               <button
                 onClick={() => setShowSidebar(true)}
-                className="absolute top-4 left-4 p-2 rounded-xl bg-white/10 text-white/60 hover:text-white"
+                className="absolute top-4 left-4 p-2 rounded-xl bg-white/10 text-white/60 hover:text-white hover:bg-white/20 transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
             )}
-            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-600/20 to-purple-600/20 border border-white/10 flex items-center justify-center mb-6">
-              <svg className="w-12 h-12 text-indigo-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-indigo-500/20 to-purple-600/20 flex items-center justify-center mb-6 border border-white/5">
+              <svg className="w-10 h-10 text-indigo-400/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Nexus</h2>
-            <p className="text-white/40 text-sm max-w-xs">Выберите чат слева или найдите пользователя через поиск, чтобы начать общение</p>
+            <p className="text-white/30 text-lg font-medium">Nexus Messenger</p>
+            <p className="text-white/15 text-sm mt-2 text-center max-w-xs">
+              Выберите чат или найдите собеседника во вкладке «Люди»
+            </p>
           </div>
         )}
       </div>
 
-      {/* Mobile overlay */}
-      {isMobile && showSidebar && selectedChatId && (
-        <div className="absolute inset-0 bg-black/50 z-20" onClick={() => setShowSidebar(false)} />
-      )}
-
-      {/* SETTINGS PANEL */}
-      {showSettings && currentUser && (
-        <div className="absolute inset-0 z-40 flex">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setShowSettings(false)}
-          />
-          {/* Panel */}
-          <div className={`
-            relative z-50 flex
-            ${isMobile ? "w-full" : "w-full max-w-3xl mx-auto my-0 shadow-2xl"}
-            h-full bg-[#0f0c29] border-x border-white/5
-            animate-in slide-in-from-left-4 duration-300
-          `}>
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSettings(false)} />
+          <div className="relative w-full max-w-2xl h-full bg-[#16132a] shadow-2xl overflow-hidden ml-0 md:ml-auto md:mr-auto md:my-4 md:rounded-2xl md:h-[calc(100%-2rem)]">
             <SettingsSidebar
               currentUser={currentUser}
               onClose={() => setShowSettings(false)}
-              onUserUpdated={(updatedUser) => {
-                setCurrentUser(updatedUser);
+              onUserUpdated={(user) => {
+                setCurrentUser(user);
               }}
               onLogout={handleLogout}
             />
@@ -494,3 +676,5 @@ export default function MessengerPage() {
     </div>
   );
 }
+
+export default MessengerPage;

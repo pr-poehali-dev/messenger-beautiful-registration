@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { User } from "@/lib/types";
-import { updateUser, changePassword } from "@/lib/storage";
+import { updateUser, changePassword, getStoredToken } from "@/lib/storage";
 import { toast } from "sonner";
 
 const AVATAR_COLORS = [
   "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e",
   "#f97316", "#22c55e", "#14b8a6", "#3b82f6",
   "#06b6d4", "#a855f7", "#eab308", "#ef4444",
+  "#84cc16", "#0ea5e9", "#d946ef", "#f472b6",
 ];
 
 type SettingsSection = "profile" | "account" | "appearance" | "notifications" | "privacy" | "about";
@@ -60,9 +61,12 @@ export default function SettingsSidebar({ currentUser, onClose, onUserUpdated, o
   const [showLastSeen, setShowLastSeen] = useState(true);
   const [readReceipts, setReadReceipts] = useState(true);
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
+    const token = getStoredToken();
+    if (!token) return;
+
     setSavingProfile(true);
-    const result = updateUser(currentUser.id, {
+    const result = await updateUser(token, {
       display_name: displayName,
       bio,
       email,
@@ -77,7 +81,7 @@ export default function SettingsSidebar({ currentUser, onClose, onUserUpdated, o
     }
   };
 
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     if (!currentPassword || !newPassword || !confirmPassword) {
       toast.error("Заполните все поля");
       return;
@@ -86,8 +90,11 @@ export default function SettingsSidebar({ currentUser, onClose, onUserUpdated, o
       toast.error("Пароли не совпадают");
       return;
     }
+    const token = getStoredToken();
+    if (!token) return;
+
     setSavingPassword(true);
-    const result = changePassword(currentUser.id, currentPassword, newPassword);
+    const result = await changePassword(token, currentPassword, newPassword);
     setSavingPassword(false);
     if ("error" in result) {
       toast.error(result.error);
@@ -213,477 +220,317 @@ export default function SettingsSidebar({ currentUser, onClose, onUserUpdated, o
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
-            Выйти из аккаунта
+            Выйти
           </button>
         </div>
       </div>
 
       {/* Right content */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-[#0f0c29]">
-        <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6">
+        {/* PROFILE SECTION */}
+        {activeSection === "profile" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">Редактировать профиль</h3>
+              <p className="text-white/40 text-sm">Измените свои данные и аватар</p>
+            </div>
 
-          {/* ===== PROFILE SECTION ===== */}
-          {activeSection === "profile" && (
-            <div className="max-w-lg">
-              <h3 className="text-white text-xl font-bold mb-1">Редактировать профиль</h3>
-              <p className="text-white/40 text-sm mb-6">Обновите своё имя, аватар и описание</p>
-
-              {/* Avatar section */}
-              <div className="bg-white/5 rounded-2xl p-5 mb-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Аватар</p>
-                <div className="flex items-center gap-5 mb-4">
-                  <Avatar color={avatarColor} initials={currentUser.avatar_initials} size="xl" />
-                  <div>
-                    <p className="text-white font-semibold">{displayName || currentUser.display_name}</p>
-                    <p className="text-white/40 text-sm">@{currentUser.username}</p>
-                    <p className="text-white/30 text-xs mt-1">Выберите цвет аватара ниже</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {AVATAR_COLORS.map(color => (
-                    <button
-                      key={color}
-                      onClick={() => setAvatarColor(color)}
-                      className={`w-8 h-8 rounded-full transition-all duration-150 ${
-                        avatarColor === color
-                          ? "ring-2 ring-white ring-offset-2 ring-offset-[#16132a] scale-110"
-                          : "hover:scale-110 opacity-70 hover:opacity-100"
-                      }`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Display name */}
-              <div className="bg-white/5 rounded-2xl p-5 mb-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Основная информация</p>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-white/60 text-sm block mb-1.5">Отображаемое имя</label>
-                    <input
-                      type="text"
-                      value={displayName}
-                      onChange={e => setDisplayName(e.target.value)}
-                      placeholder="Ваше имя"
-                      maxLength={60}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-all"
-                    />
-                    <p className="text-white/25 text-xs mt-1 text-right">{displayName.length}/60</p>
-                  </div>
-
-                  <div>
-                    <label className="text-white/60 text-sm block mb-1.5">Имя пользователя</label>
-                    <input
-                      type="text"
-                      value={`@${currentUser.username}`}
-                      disabled
-                      className="w-full bg-white/[0.03] border border-white/5 rounded-xl px-4 py-2.5 text-white/30 text-sm cursor-not-allowed"
-                    />
-                    <p className="text-white/25 text-xs mt-1">Имя пользователя нельзя изменить</p>
-                  </div>
-
-                  <div>
-                    <label className="text-white/60 text-sm block mb-1.5">О себе</label>
-                    <textarea
-                      value={bio}
-                      onChange={e => setBio(e.target.value)}
-                      placeholder="Расскажите о себе..."
-                      maxLength={200}
-                      rows={3}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-all resize-none"
-                    />
-                    <p className="text-white/25 text-xs mt-1 text-right">{bio.length}/200</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Email */}
-              <div className="bg-white/5 rounded-2xl p-5 mb-6 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Контактная информация</p>
+            {/* Avatar preview & color picker */}
+            <div className="bg-white/5 rounded-2xl p-6 border border-white/5">
+              <p className="text-white/60 text-sm font-medium mb-4">Аватар</p>
+              <div className="flex items-center gap-6 mb-4">
+                <Avatar color={avatarColor} initials={currentUser.avatar_initials} size="xl" />
                 <div>
-                  <label className="text-white/60 text-sm block mb-1.5">Email адрес</label>
+                  <p className="text-white text-sm font-medium">{displayName || currentUser.display_name}</p>
+                  <p className="text-white/40 text-xs mt-0.5">@{currentUser.username}</p>
+                  <p className="text-white/30 text-xs mt-2">Выберите цвет аватара ниже</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {AVATAR_COLORS.map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setAvatarColor(c)}
+                    className={`w-9 h-9 rounded-full transition-all hover:scale-110 ${
+                      avatarColor === c ? "ring-2 ring-white ring-offset-2 ring-offset-[#16132a] scale-110" : "opacity-70 hover:opacity-100"
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Display name */}
+            <div>
+              <label className="block text-xs font-medium text-white/60 mb-1.5 uppercase tracking-wider">Имя</label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={e => setDisplayName(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 transition-all"
+                placeholder="Ваше имя"
+              />
+            </div>
+
+            {/* Bio */}
+            <div>
+              <label className="block text-xs font-medium text-white/60 mb-1.5 uppercase tracking-wider">О себе</label>
+              <textarea
+                value={bio}
+                onChange={e => setBio(e.target.value)}
+                rows={3}
+                maxLength={200}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 transition-all resize-none"
+                placeholder="Расскажите о себе..."
+              />
+              <p className="text-white/30 text-xs mt-1">{bio.length}/200</p>
+            </div>
+
+            {/* Email */}
+            <div>
+              <label className="block text-xs font-medium text-white/60 mb-1.5 uppercase tracking-wider">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 transition-all"
+                placeholder="email@example.com"
+              />
+            </div>
+
+            {/* Save button */}
+            <button
+              onClick={handleSaveProfile}
+              disabled={savingProfile}
+              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {savingProfile ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  Сохранение...
+                </>
+              ) : (
+                "Сохранить изменения"
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* ACCOUNT SECTION */}
+        {activeSection === "account" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">Аккаунт и безопасность</h3>
+              <p className="text-white/40 text-sm">Управление паролем и безопасностью</p>
+            </div>
+
+            <div className="bg-white/5 rounded-2xl p-5 border border-white/5">
+              <p className="text-white/60 text-sm font-medium mb-4">Информация об аккаунте</p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-white/40 text-sm">Имя пользователя</span>
+                  <span className="text-white text-sm font-medium">@{currentUser.username}</span>
+                </div>
+                <div className="flex items-center justify-between py-2 border-t border-white/5">
+                  <span className="text-white/40 text-sm">Email</span>
+                  <span className="text-white text-sm">{currentUser.email}</span>
+                </div>
+                <div className="flex items-center justify-between py-2 border-t border-white/5">
+                  <span className="text-white/40 text-sm">Дата регистрации</span>
+                  <span className="text-white text-sm">{new Date(currentUser.created_at).toLocaleDateString("ru")}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white/5 rounded-2xl p-5 border border-white/5">
+              <p className="text-white/60 text-sm font-medium mb-4">Изменить пароль</p>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-white/40 mb-1.5 uppercase tracking-wider">Текущий пароль</label>
+                  <div className="relative">
+                    <input
+                      type={showCurrentPassword ? "text" : "password"}
+                      value={currentPassword}
+                      onChange={e => setCurrentPassword(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/60 transition-all pr-10"
+                      placeholder="Введите текущий пароль"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        {showCurrentPassword ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        )}
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-white/40 mb-1.5 uppercase tracking-wider">Новый пароль</label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/60 transition-all pr-10"
+                      placeholder="Минимум 6 символов"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        {showNewPassword ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        )}
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-white/40 mb-1.5 uppercase tracking-wider">Подтвердите пароль</label>
                   <input
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="your@email.com"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-all"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/60 transition-all"
+                    placeholder="Повторите новый пароль"
                   />
                 </div>
-              </div>
-
-              <button
-                onClick={handleSaveProfile}
-                disabled={savingProfile}
-                className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {savingProfile ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-                Сохранить изменения
-              </button>
-            </div>
-          )}
-
-          {/* ===== ACCOUNT SECTION ===== */}
-          {activeSection === "account" && (
-            <div className="max-w-lg">
-              <h3 className="text-white text-xl font-bold mb-1">Аккаунт и безопасность</h3>
-              <p className="text-white/40 text-sm mb-6">Управление паролем и безопасностью аккаунта</p>
-
-              {/* Account info */}
-              <div className="bg-white/5 rounded-2xl p-5 mb-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Информация об аккаунте</p>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center py-2 border-b border-white/5">
-                    <span className="text-white/50 text-sm">Имя пользователя</span>
-                    <span className="text-white text-sm font-medium">@{currentUser.username}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2 border-b border-white/5">
-                    <span className="text-white/50 text-sm">Email</span>
-                    <span className="text-white text-sm font-medium">{currentUser.email}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2">
-                    <span className="text-white/50 text-sm">Дата регистрации</span>
-                    <span className="text-white text-sm font-medium">
-                      {new Date(currentUser.created_at).toLocaleDateString("ru", { day: "numeric", month: "long", year: "numeric" })}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Change password */}
-              <div className="bg-white/5 rounded-2xl p-5 mb-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Изменить пароль</p>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-white/60 text-sm block mb-1.5">Текущий пароль</label>
-                    <div className="relative">
-                      <input
-                        type={showCurrentPassword ? "text" : "password"}
-                        value={currentPassword}
-                        onChange={e => setCurrentPassword(e.target.value)}
-                        placeholder="Введите текущий пароль"
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 pr-10 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-all"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPassword(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
-                      >
-                        {showCurrentPassword ? (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                          </svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-white/60 text-sm block mb-1.5">Новый пароль</label>
-                    <div className="relative">
-                      <input
-                        type={showNewPassword ? "text" : "password"}
-                        value={newPassword}
-                        onChange={e => setNewPassword(e.target.value)}
-                        placeholder="Минимум 6 символов"
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 pr-10 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-all"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPassword(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
-                      >
-                        {showNewPassword ? (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                          </svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-white/60 text-sm block mb-1.5">Подтвердить пароль</label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={e => setConfirmPassword(e.target.value)}
-                      placeholder="Повторите новый пароль"
-                      className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:ring-1 transition-all ${
-                        confirmPassword && newPassword !== confirmPassword
-                          ? "border-red-500/50 focus:ring-red-500/30"
-                          : "border-white/10 focus:ring-indigo-500/60 focus:border-indigo-500/40"
-                      }`}
-                    />
-                    {confirmPassword && newPassword !== confirmPassword && (
-                      <p className="text-red-400 text-xs mt-1">Пароли не совпадают</p>
-                    )}
-                  </div>
-                </div>
-
                 <button
                   onClick={handleChangePassword}
                   disabled={savingPassword}
-                  className="mt-4 w-full py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white font-semibold text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {savingPassword ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      Сохранение...
+                    </>
                   ) : (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
+                    "Изменить пароль"
                   )}
-                  Изменить пароль
-                </button>
-              </div>
-
-              {/* Danger zone */}
-              <div className="bg-red-500/5 rounded-2xl p-5 border border-red-500/10">
-                <p className="text-red-400/80 text-xs uppercase tracking-wider font-medium mb-3">Опасная зона</p>
-                <p className="text-white/40 text-sm mb-4">
-                  После выхода из аккаунта вам потребуется войти снова. Все данные останутся сохранены.
-                </p>
-                <button
-                  onClick={onLogout}
-                  className="w-full py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-semibold text-sm transition-all flex items-center justify-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                  Выйти из аккаунта
                 </button>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* ===== NOTIFICATIONS SECTION ===== */}
-          {activeSection === "notifications" && (
-            <div className="max-w-lg">
-              <h3 className="text-white text-xl font-bold mb-1">Уведомления</h3>
-              <p className="text-white/40 text-sm mb-6">Управляйте тем, как вы получаете уведомления</p>
-
-              <div className="bg-white/5 rounded-2xl p-5 mb-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Сообщения</p>
-                <div className="space-y-1">
-                  <ToggleRow
-                    label="Уведомления о сообщениях"
-                    description="Получать уведомления при новых сообщениях"
-                    checked={notifMessages}
-                    onChange={setNotifMessages}
-                  />
-                  <ToggleRow
-                    label="Звуковые уведомления"
-                    description="Воспроизводить звук при получении сообщения"
-                    checked={notifSounds}
-                    onChange={setNotifSounds}
-                  />
-                  <ToggleRow
-                    label="Предпросмотр сообщений"
-                    description="Показывать содержимое сообщения в уведомлении"
-                    checked={notifPreview}
-                    onChange={setNotifPreview}
-                  />
-                </div>
-              </div>
-
-              <div className="bg-indigo-500/5 rounded-2xl p-4 border border-indigo-500/10">
-                <div className="flex gap-3">
-                  <svg className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-white/50 text-sm">
-                    Настройки уведомлений сохраняются локально и применяются только в текущем браузере.
-                  </p>
-                </div>
-              </div>
+        {/* NOTIFICATIONS SECTION */}
+        {activeSection === "notifications" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">Уведомления</h3>
+              <p className="text-white/40 text-sm">Настройка уведомлений</p>
             </div>
-          )}
-
-          {/* ===== PRIVACY SECTION ===== */}
-          {activeSection === "privacy" && (
-            <div className="max-w-lg">
-              <h3 className="text-white text-xl font-bold mb-1">Конфиденциальность</h3>
-              <p className="text-white/40 text-sm mb-6">Управление видимостью вашего профиля</p>
-
-              <div className="bg-white/5 rounded-2xl p-5 mb-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Видимость профиля</p>
-                <div className="space-y-1">
-                  <ToggleRow
-                    label="Статус онлайн"
-                    description="Показывать когда вы онлайн другим пользователям"
-                    checked={showOnlineStatus}
-                    onChange={setShowOnlineStatus}
-                  />
-                  <ToggleRow
-                    label="Время последнего визита"
-                    description="Показывать когда вы последний раз были в сети"
-                    checked={showLastSeen}
-                    onChange={setShowLastSeen}
-                  />
-                  <ToggleRow
-                    label="Уведомления о прочтении"
-                    description="Показывать отправителю, что вы прочитали сообщение"
-                    checked={readReceipts}
-                    onChange={setReadReceipts}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ===== APPEARANCE SECTION ===== */}
-          {activeSection === "appearance" && (
-            <div className="max-w-lg">
-              <h3 className="text-white text-xl font-bold mb-1">Оформление</h3>
-              <p className="text-white/40 text-sm mb-6">Персонализируйте внешний вид приложения</p>
-
-              <div className="bg-white/5 rounded-2xl p-5 mb-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Тема приложения</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button className="relative p-4 rounded-xl border-2 border-indigo-500 bg-indigo-500/10 transition-all">
-                    <div className="w-full h-16 rounded-lg bg-[#0f0c29] mb-2 flex items-end p-2 gap-1">
-                      <div className="w-1/3 h-8 rounded bg-[#16132a]" />
-                      <div className="flex-1 h-10 rounded bg-[#16132a]" />
-                    </div>
-                    <p className="text-white text-sm font-medium">Тёмная</p>
-                    <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center">
-                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                  </button>
-                  <button className="relative p-4 rounded-xl border-2 border-white/10 hover:border-white/20 bg-white/3 transition-all opacity-60 cursor-not-allowed" disabled>
-                    <div className="w-full h-16 rounded-lg bg-gray-100 mb-2 flex items-end p-2 gap-1">
-                      <div className="w-1/3 h-8 rounded bg-gray-200" />
-                      <div className="flex-1 h-10 rounded bg-gray-200" />
-                    </div>
-                    <p className="text-white/50 text-sm font-medium">Светлая</p>
-                    <span className="absolute top-2 right-2 text-xs text-white/30 bg-white/5 px-1.5 py-0.5 rounded">Скоро</span>
+            <div className="bg-white/5 rounded-2xl p-5 border border-white/5 space-y-4">
+              {[
+                { label: "Уведомления о сообщениях", desc: "Получать уведомления о новых сообщениях", value: notifMessages, set: setNotifMessages },
+                { label: "Звуки", desc: "Воспроизводить звук при получении сообщений", value: notifSounds, set: setNotifSounds },
+                { label: "Предпросмотр", desc: "Показывать текст сообщения в уведомлении", value: notifPreview, set: setNotifPreview },
+              ].map((item, i) => (
+                <div key={i} className={`flex items-center justify-between py-2 ${i > 0 ? "border-t border-white/5" : ""}`}>
+                  <div>
+                    <p className="text-white text-sm font-medium">{item.label}</p>
+                    <p className="text-white/30 text-xs mt-0.5">{item.desc}</p>
+                  </div>
+                  <button
+                    onClick={() => item.set(!item.value)}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${item.value ? "bg-indigo-600" : "bg-white/10"}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${item.value ? "translate-x-5" : ""}`} />
                   </button>
                 </div>
-              </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-              <div className="bg-white/5 rounded-2xl p-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Акцентный цвет</p>
-                <div className="flex flex-wrap gap-3">
-                  {[
-                    { name: "Индиго", color: "bg-indigo-500", active: true },
-                    { name: "Фиолетовый", color: "bg-violet-500", active: false },
-                    { name: "Розовый", color: "bg-pink-500", active: false },
-                    { name: "Голубой", color: "bg-blue-500", active: false },
-                    { name: "Бирюзовый", color: "bg-teal-500", active: false },
-                    { name: "Зелёный", color: "bg-emerald-500", active: false },
-                  ].map(theme => (
-                    <button
-                      key={theme.name}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-sm ${
-                        theme.active
-                          ? "border-indigo-500/50 bg-indigo-500/10 text-white"
-                          : "border-white/10 text-white/40 cursor-not-allowed opacity-50"
-                      }`}
-                      disabled={!theme.active}
-                    >
-                      <div className={`w-3 h-3 rounded-full ${theme.color}`} />
-                      {theme.name}
-                      {theme.active && (
-                        <svg className="w-3 h-3 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </button>
-                  ))}
+        {/* PRIVACY SECTION */}
+        {activeSection === "privacy" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">Конфиденциальность</h3>
+              <p className="text-white/40 text-sm">Управление видимостью</p>
+            </div>
+            <div className="bg-white/5 rounded-2xl p-5 border border-white/5 space-y-4">
+              {[
+                { label: "Статус онлайн", desc: "Показывать другим, когда вы в сети", value: showOnlineStatus, set: setShowOnlineStatus },
+                { label: "Время последнего входа", desc: "Показывать время последней активности", value: showLastSeen, set: setShowLastSeen },
+                { label: "Отчёты о прочтении", desc: "Показывать, что вы прочитали сообщение", value: readReceipts, set: setReadReceipts },
+              ].map((item, i) => (
+                <div key={i} className={`flex items-center justify-between py-2 ${i > 0 ? "border-t border-white/5" : ""}`}>
+                  <div>
+                    <p className="text-white text-sm font-medium">{item.label}</p>
+                    <p className="text-white/30 text-xs mt-0.5">{item.desc}</p>
+                  </div>
+                  <button
+                    onClick={() => item.set(!item.value)}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${item.value ? "bg-indigo-600" : "bg-white/10"}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${item.value ? "translate-x-5" : ""}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* APPEARANCE SECTION */}
+        {activeSection === "appearance" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">Оформление</h3>
+              <p className="text-white/40 text-sm">Настройка внешнего вида</p>
+            </div>
+            <div className="bg-white/5 rounded-2xl p-5 border border-white/5">
+              <p className="text-white/60 text-sm font-medium mb-4">Тема</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-4 rounded-xl bg-indigo-600/20 border-2 border-indigo-500 cursor-pointer text-center">
+                  <div className="w-8 h-8 mx-auto rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 mb-2" />
+                  <p className="text-white text-xs font-medium">Тёмная</p>
+                  <p className="text-indigo-300 text-[10px]">Активна</p>
+                </div>
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10 cursor-pointer text-center opacity-50">
+                  <div className="w-8 h-8 mx-auto rounded-full bg-gradient-to-br from-gray-200 to-gray-400 mb-2" />
+                  <p className="text-white/60 text-xs font-medium">Светлая</p>
+                  <p className="text-white/30 text-[10px]">Скоро</p>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* ===== ABOUT SECTION ===== */}
-          {activeSection === "about" && (
-            <div className="max-w-lg">
-              <h3 className="text-white text-xl font-bold mb-1">О приложении</h3>
-              <p className="text-white/40 text-sm mb-6">Информация о Nexus Messenger</p>
-
-              <div className="bg-white/5 rounded-2xl p-6 mb-5 border border-white/5 flex flex-col items-center text-center">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
-                  <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                </div>
-                <h4 className="text-white text-lg font-bold mb-1">Nexus Messenger</h4>
-                <p className="text-indigo-400 text-sm mb-3">Версия 1.0.0</p>
-                <p className="text-white/40 text-sm leading-relaxed">
-                  Современный мессенджер для удобного общения. Быстро, безопасно и красиво.
-                </p>
-              </div>
-
-              <div className="bg-white/5 rounded-2xl p-5 border border-white/5">
-                <p className="text-white/60 text-xs uppercase tracking-wider font-medium mb-4">Технические детали</p>
-                <div className="space-y-3">
-                  {[
-                    { label: "Фреймворк", value: "React 18 + TypeScript" },
-                    { label: "UI библиотека", value: "shadcn/ui + Tailwind CSS" },
-                    { label: "Хранилище данных", value: "LocalStorage" },
-                    { label: "Иконки", value: "Lucide Icons" },
-                  ].map(item => (
-                    <div key={item.label} className="flex justify-between items-center py-2 border-b border-white/5 last:border-0">
-                      <span className="text-white/50 text-sm">{item.label}</span>
-                      <span className="text-white text-sm">{item.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+        {/* ABOUT SECTION */}
+        {activeSection === "about" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">О приложении</h3>
+              <p className="text-white/40 text-sm">Информация о Nexus Messenger</p>
             </div>
-          )}
-        </div>
+            <div className="bg-white/5 rounded-2xl p-6 border border-white/5 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 mb-4 shadow-2xl shadow-indigo-500/40">
+                <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <h4 className="text-white font-bold text-lg">Nexus Messenger</h4>
+              <p className="text-white/40 text-sm mt-1">Версия 2.0.0</p>
+              <p className="text-white/30 text-xs mt-4 max-w-xs mx-auto">
+                Мессенджер нового поколения с красивым интерфейсом, поиском пользователей и настоящей базой данных.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-function ToggleRow({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-start justify-between py-3 border-b border-white/5 last:border-0 gap-4">
-      <div className="flex-1 min-w-0">
-        <p className="text-white text-sm font-medium">{label}</p>
-        <p className="text-white/40 text-xs mt-0.5">{description}</p>
-      </div>
-      <button
-        onClick={() => onChange(!checked)}
-        className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-all duration-200 ${
-          checked ? "bg-indigo-600" : "bg-white/10"
-        }`}
-      >
-        <span
-          className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200 ${
-            checked ? "left-6" : "left-1"
-          }`}
-        />
-      </button>
     </div>
   );
 }

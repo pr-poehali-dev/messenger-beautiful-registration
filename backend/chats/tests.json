@@ -11,6 +11,18 @@
       "method": "GET",
       "path": "/chats/users/search?q=test",
       "expectedStatus": 401
+    },
+    {
+      "name": "Get online users without auth",
+      "method": "GET",
+      "path": "/chats/users/online",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Update profile without auth",
+      "method": "PUT",
+      "path": "/chats/users/profile",
+      "expectedStatus": 401
     }
   ]
 }

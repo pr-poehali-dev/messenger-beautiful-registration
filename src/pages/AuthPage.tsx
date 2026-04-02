@@ -60,7 +60,7 @@ export default function AuthPage() {
 
     setLoading(true);
     try {
-      const result = login(loginData.login.trim(), loginData.password);
+      const result = await login(loginData.login.trim(), loginData.password);
       if ("error" in result) {
         setLoginErrors({ general: result.error });
         toast.error(result.error);
@@ -68,7 +68,7 @@ export default function AuthPage() {
         toast.success("Добро пожаловать, " + result.user.display_name + "!");
         navigate("/");
       }
-    } catch (err) {
+    } catch {
       toast.error("Произошла ошибка. Попробуйте снова.");
     } finally {
       setLoading(false);
@@ -83,17 +83,16 @@ export default function AuthPage() {
 
     setLoading(true);
     try {
-      const result = register(
+      const result = await register(
         regData.username.trim(),
         regData.display_name.trim(),
         regData.email.trim(),
         regData.password
       );
       if ("error" in result) {
-        // Map error to field
         const fieldErrors: Record<string, string> = {};
         const err = result.error;
-        if (err.includes("имя пользователя") || err.includes("занято")) fieldErrors.username = err;
+        if (err.includes("имя пользователя") || err.includes("занято") || err.includes("Имя пользователя")) fieldErrors.username = err;
         else if (err.includes("email") || err.includes("Email")) fieldErrors.email = err;
         else if (err.includes("пароль") || err.includes("Пароль")) fieldErrors.password = err;
         else if (err.includes("имя") || err.includes("Имя")) fieldErrors.display_name = err;
@@ -104,7 +103,7 @@ export default function AuthPage() {
         toast.success("Аккаунт создан! Добро пожаловать, " + result.user.display_name + "!");
         navigate("/");
       }
-    } catch (err) {
+    } catch {
       toast.error("Произошла ошибка. Попробуйте снова.");
     } finally {
       setLoading(false);
@@ -214,25 +213,17 @@ export default function AuthPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold py-3.5 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold hover:from-indigo-500 hover:to-purple-500 transition-all shadow-lg shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {loading ? (
                     <>
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Входим...
+                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      Вход...
                     </>
-                  ) : "Войти"}
+                  ) : (
+                    "Войти"
+                  )}
                 </button>
-
-                <p className="text-center text-white/40 text-xs">
-                  Нет аккаунта?{" "}
-                  <button type="button" onClick={() => setTab("register")} className="text-indigo-400 hover:text-indigo-300 font-medium">
-                    Зарегистрируйтесь
-                  </button>
-                </p>
               </form>
             )}
 
@@ -259,11 +250,10 @@ export default function AuthPage() {
                       setRegData(d => ({ ...d, display_name: e.target.value }));
                       if (regErrors.display_name) setRegErrors(err => ({ ...err, display_name: "" }));
                     }}
-                    placeholder="Иван Иванов"
+                    placeholder="Иван Петров"
                     className={`w-full bg-white/10 border rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
                       regErrors.display_name ? "border-red-500/60 focus:ring-red-500/40" : "border-white/20 focus:ring-indigo-500/60"
                     }`}
-                    autoComplete="name"
                   />
                   {regErrors.display_name && <p className="text-red-400 text-xs mt-1">{regErrors.display_name}</p>}
                 </div>
@@ -273,19 +263,18 @@ export default function AuthPage() {
                     Имя пользователя
                   </label>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 font-medium">@</span>
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 text-sm">@</span>
                     <input
                       type="text"
                       value={regData.username}
                       onChange={e => {
-                        setRegData(d => ({ ...d, username: e.target.value.replace(/\s/g, "") }));
+                        setRegData(d => ({ ...d, username: e.target.value.replace(/[^a-zA-Z0-9_]/g, "") }));
                         if (regErrors.username) setRegErrors(err => ({ ...err, username: "" }));
                       }}
-                      placeholder="username"
+                      placeholder="ivan_petrov"
                       className={`w-full bg-white/10 border rounded-xl pl-8 pr-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
                         regErrors.username ? "border-red-500/60 focus:ring-red-500/40" : "border-white/20 focus:ring-indigo-500/60"
                       }`}
-                      autoComplete="username"
                     />
                   </div>
                   {regErrors.username && <p className="text-red-400 text-xs mt-1">{regErrors.username}</p>}
@@ -302,7 +291,7 @@ export default function AuthPage() {
                       setRegData(d => ({ ...d, email: e.target.value }));
                       if (regErrors.email) setRegErrors(err => ({ ...err, email: "" }));
                     }}
-                    placeholder="email@example.com"
+                    placeholder="ivan@mail.ru"
                     className={`w-full bg-white/10 border rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
                       regErrors.email ? "border-red-500/60 focus:ring-red-500/40" : "border-white/20 focus:ring-indigo-500/60"
                     }`}
@@ -333,7 +322,7 @@ export default function AuthPage() {
 
                 <div>
                   <label className="block text-xs font-medium text-indigo-300 mb-1.5 uppercase tracking-wider">
-                    Подтвердите пароль
+                    Подтверждение пароля
                   </label>
                   <input
                     type="password"
@@ -354,34 +343,26 @@ export default function AuthPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold py-3.5 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2"
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold hover:from-indigo-500 hover:to-purple-500 transition-all shadow-lg shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {loading ? (
                     <>
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Создаём аккаунт...
+                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      Создание...
                     </>
-                  ) : "Создать аккаунт"}
+                  ) : (
+                    "Создать аккаунт"
+                  )}
                 </button>
-
-                <p className="text-center text-white/40 text-xs">
-                  Уже есть аккаунт?{" "}
-                  <button type="button" onClick={() => setTab("login")} className="text-indigo-400 hover:text-indigo-300 font-medium">
-                    Войдите
-                  </button>
-                </p>
               </form>
             )}
           </div>
         </div>
 
-        {/* Demo hint */}
-        <div className="mt-4 bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
-          <p className="text-white/50 text-xs">Демо-аккаунты: <span className="text-indigo-400">alice / bob / carol</span> • Пароль: <span className="text-indigo-400">demo123</span></p>
-        </div>
+        {/* Footer */}
+        <p className="text-center text-white/20 text-xs mt-6">
+          Nexus Messenger &copy; 2024
+        </p>
       </div>
     </div>
   );
