@@ -402,6 +402,57 @@ export function getUserById(userId: string): User | null {
   return safe as User;
 }
 
+export function updateUser(
+  userId: string,
+  updates: Partial<Pick<User, "display_name" | "bio" | "avatar_color" | "avatar_initials" | "email">>
+): { user: User } | { error: string } {
+  const users = getUsers();
+  const idx = users.findIndex(u => u.id === userId);
+  if (idx === -1) return { error: "Пользователь не найден" };
+
+  if (updates.display_name !== undefined) {
+    if (updates.display_name.trim().length < 2)
+      return { error: "Имя должно быть минимум 2 символа" };
+    updates.display_name = updates.display_name.trim();
+    updates.avatar_initials = getInitials(updates.display_name);
+  }
+
+  if (updates.email !== undefined) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updates.email))
+      return { error: "Некорректный email адрес" };
+    const emailTaken = users.find(u => u.id !== userId && u.email === updates.email!.toLowerCase());
+    if (emailTaken) return { error: "Этот email уже занят" };
+    updates.email = updates.email.toLowerCase();
+  }
+
+  users[idx] = { ...users[idx], ...updates };
+  saveUsers(users);
+
+  const { password_hash: _, ...safe } = users[idx];
+  return { user: safe as User };
+}
+
+export function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): { success: true } | { error: string } {
+  if (newPassword.length < 6)
+    return { error: "Новый пароль минимум 6 символов" };
+
+  const users = getUsers();
+  const idx = users.findIndex(u => u.id === userId);
+  if (idx === -1) return { error: "Пользователь не найден" };
+
+  const user = users[idx];
+  if (!user.password_hash || !verifyPassword(currentPassword, user.password_hash))
+    return { error: "Неверный текущий пароль" };
+
+  users[idx].password_hash = hashPassword(newPassword);
+  saveUsers(users);
+  return { success: true };
+}
+
 // Add demo users for testing
 export function initDemoData() {
   const users = getUsers();

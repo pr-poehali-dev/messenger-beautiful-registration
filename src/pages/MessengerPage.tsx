@@ -6,6 +6,7 @@ import {
 } from "@/lib/storage";
 import { User, Chat, Message } from "@/lib/types";
 import { toast } from "sonner";
+import SettingsSidebar from "@/components/SettingsSidebar";
 
 function Avatar({ color, initials, size = "md", online }: { color: string; initials?: string; size?: "sm" | "md" | "lg"; online?: boolean }) {
   const sizes = { sm: "w-8 h-8 text-xs", md: "w-11 h-11 text-sm", lg: "w-14 h-14 text-base" };
@@ -51,6 +52,7 @@ export default function MessengerPage() {
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -165,20 +167,25 @@ export default function MessengerPage() {
         {/* Sidebar Header */}
         <div className="p-4 border-b border-white/5">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowSettings(true)}
+              className="flex items-center gap-3 min-w-0 flex-1 rounded-xl hover:bg-white/5 transition-colors p-1 -m-1 text-left"
+              title="Открыть настройки"
+            >
               <Avatar color={currentUser.avatar_color} initials={currentUser.avatar_initials} size="md" online={true} />
               <div className="min-w-0">
                 <p className="text-white font-semibold text-sm truncate">{currentUser.display_name}</p>
                 <p className="text-indigo-400 text-xs">@{currentUser.username}</p>
               </div>
-            </div>
+            </button>
             <button
-              onClick={handleLogout}
-              className="p-2 rounded-xl text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
-              title="Выйти"
+              onClick={() => setShowSettings(true)}
+              className="p-2 rounded-xl text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors flex-shrink-0"
+              title="Настройки"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </button>
           </div>
@@ -456,6 +463,33 @@ export default function MessengerPage() {
       {/* Mobile overlay */}
       {isMobile && showSidebar && selectedChatId && (
         <div className="absolute inset-0 bg-black/50 z-20" onClick={() => setShowSidebar(false)} />
+      )}
+
+      {/* SETTINGS PANEL */}
+      {showSettings && currentUser && (
+        <div className="absolute inset-0 z-40 flex">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowSettings(false)}
+          />
+          {/* Panel */}
+          <div className={`
+            relative z-50 flex
+            ${isMobile ? "w-full" : "w-full max-w-3xl mx-auto my-0 shadow-2xl"}
+            h-full bg-[#0f0c29] border-x border-white/5
+            animate-in slide-in-from-left-4 duration-300
+          `}>
+            <SettingsSidebar
+              currentUser={currentUser}
+              onClose={() => setShowSettings(false)}
+              onUserUpdated={(updatedUser) => {
+                setCurrentUser(updatedUser);
+              }}
+              onLogout={handleLogout}
+            />
+          </div>
+        </div>
       )}
     </div>
   );
